@@ -10,7 +10,7 @@ import sys
 
 from utils import *
 
-EOF_MARK = '%EndOfFile%'
+EOF_MARK = '_EndOfFile_'
 
 def start_process(processes=None, **kwargs):
     p = multiprocessing.Process(**kwargs)
@@ -31,7 +31,7 @@ def stdin2q(q, output_read, input_write):
     for line in output_read:
         q.put(line.rstrip())
     q.put(None)
-    
+
 def q2stdout(q, output_read, input_write):
     output_read.close()
     for line in iteritems(q):
@@ -74,9 +74,9 @@ def labelled2eof(q_lines_in, q_labels_in, processes):
                 q_lines_out.put(EOF_MARK)
         q_lines_out.put(None)
 
-    start_process(target=worker, args=(q_lines_in, q_labels_in, q_lines_out), processes=processes)            
+    start_process(target=worker, args=(q_lines_in, q_labels_in, q_lines_out), processes=processes)
     return q_lines_out
-        
+
 def eof2labelled(q_lines_in, processes):
     q_lines_out = multiprocessing.Queue()
     q_labels_out = multiprocessing.Queue()
@@ -97,7 +97,7 @@ def eof2labelled(q_lines_in, processes):
             raise RuntimeError('Improperly EOF-chunked lines!')
         q_lines_out.put(None)
         q_labels_out.put(None)
-        
+
     start_process(target=worker, args=(q_lines_in, q_lines_out, q_labels_out), processes=processes)
     return q_lines_out, q_labels_out
 
@@ -137,7 +137,7 @@ def join_lines(q_lines_in_1, q_labels_in_1, q_lines_in_2, q_labels_in_2, process
             q_labels_out.put(label_1)
         q_lines_out.put(None)
         q_labels_out.put(None)
-        
+
     start_process(
         target=worker,
         args=(q_lines_in_1, q_labels_in_1, q_lines_in_2, q_labels_in_2, q_lines_out, q_labels_out),
@@ -148,7 +148,7 @@ def join_lines(q_lines_in_1, q_labels_in_1, q_lines_in_2, q_labels_in_2, process
 def parse_input(q, processes):
     q_meta = multiprocessing.Queue()
     q_lines_in_eof = multiprocessing.Queue()
-    
+
     def worker(q, q_meta, q_lines_in_eof):
         for topic, text_id, utf8_fname, xml_fname, csv_fname in iteritems(q):
             has_lines = False
@@ -161,11 +161,11 @@ def parse_input(q, processes):
                 q_meta.put((topic, text_id, xml_fname, csv_fname))
         q_meta.put(None)
         q_lines_in_eof.put(None)
-        
+
     start_process(target=worker, args=(q, q_meta, q_lines_in_eof), processes=processes)
     return q_meta, q_lines_in_eof
 
-def dump_result(q_meta, q_lines, header):
+def dump_result(q_meta, q_lines, header, csv_to_txm_path):
     lines = []
     for line in iteritems(q_lines):
         if line.rstrip() == EOF_MARK:
@@ -175,60 +175,63 @@ def dump_result(q_meta, q_lines, header):
                 fout.write(header + '\n')
                 fout.write('\n'.join(lines))
                 lines = []
-            run('./CsvToTxm "{0}:{1}" <"{2}" >"{3}"'.format(topic, text_id, csv_fname, xml_fname))
+            run('{csv_to_txm} "{0}:{1}" <"{2}" >"{3}"'.format(topic, text_id, csv_fname, xml_fname, csv_to_txm=csv_to_txm_path))
         else:
             lines.append(line)
 
-def text_processor_named_groups(q):
-    processes = []
-    q_meta, q_lines_in_eof = parse_input(q, processes=processes)
-
-    q_lines_tokenized_eof = run_shell_process('./Tokenize' + ' ' + EOF_MARK, q_lines_in_eof, processes)
-    q_lines_tokenized_eof_1, q_lines_tokenized_eof_2 = qdup(q_lines_tokenized_eof, processes)
-    
-    q_lines_tokenized_first_column_eof = get_first_column(q_lines_tokenized_eof_1, processes)
-    q_lines_tokenized_first_column_labelled, q_labels_tokenized_first_column = eof2labelled(q_lines_tokenized_first_column_eof, processes)
-    
-    q_lines_tokenized_labelled_2, q_labels_tokenzied_2 = eof2labelled(q_lines_tokenized_eof_2, processes)
-
-    q_lines_tagged_labelled = run_shell_process(
-        'tree-tagger -lemma /Applications/treetagger/models/ru.par',
-        q_lines_tokenized_first_column_labelled,
-        processes
-    )
-
-    q_lines_joined_eof = labelled2eof(*join_lines(
-        q_lines_tokenized_labelled_2, q_labels_tokenzied_2,
-        q_lines_tagged_labelled, q_labels_tokenized_first_column,
-        processes
-    ), processes=processes)
-
-    q_lines_named_groups_eof = run_shell_process(
-        './GetNamedGroups' + ' ' + EOF_MARK,
-        q_lines_joined_eof,
-        processes
-    )
-
-    ng_header = '\t'.join(['w', 'ng_stem', 'ng_morph_tags', 'ng_type', 'tt_tag', 'tt_lemma'])
-    dump_result(q_meta, q_lines_named_groups_eof, ng_header)
-
-    for p in processes:
-        p.join()
-
-def text_processor_ngrams(min_order, max_order):
+def text_processor_named_groups(tokenize_path, tree_tagger_path, tree_tagger_model_path, get_named_groups_path, morphology_dict_path, verb_dict_path, csv_to_txm_path):
     def worker(q):
         processes = []
         q_meta, q_lines_in_eof = parse_input(q, processes=processes)
 
-        q_lines_tokenized_eof = run_shell_process('./Tokenize' + ' ' + EOF_MARK, q_lines_in_eof, processes)
+        q_lines_tokenized_eof = run_shell_process('{tokenize} {0}'.format(EOF_MARK, tokenize=tokenize_path), q_lines_in_eof, processes)
+        q_lines_tokenized_eof_1, q_lines_tokenized_eof_2 = qdup(q_lines_tokenized_eof, processes)
+
+        q_lines_tokenized_first_column_eof = get_first_column(q_lines_tokenized_eof_1, processes)
+        q_lines_tokenized_first_column_labelled, q_labels_tokenized_first_column = eof2labelled(q_lines_tokenized_first_column_eof, processes)
+
+        q_lines_tokenized_labelled_2, q_labels_tokenzied_2 = eof2labelled(q_lines_tokenized_eof_2, processes)
+
+        q_lines_tagged_labelled = run_shell_process(
+            '{tree_tagger} -lemma {tree_tagger_model}'.format(tree_tagger=tree_tagger_path, tree_tagger_model=tree_tagger_model_path),
+            q_lines_tokenized_first_column_labelled,
+            processes
+        )
+
+        q_lines_joined_eof = labelled2eof(*join_lines(
+            q_lines_tokenized_labelled_2, q_labels_tokenzied_2,
+            q_lines_tagged_labelled, q_labels_tokenized_first_column,
+            processes
+        ), processes=processes)
+
+        q_lines_named_groups_eof = run_shell_process(
+            '{get_named_groups} {0} {1} {2}'.format(morphology_dict_path, verb_dict_path, EOF_MARK, get_named_groups=get_named_groups_path),
+            q_lines_joined_eof,
+            processes
+        )
+
+        ng_header = '\t'.join(['w', 'ng_stem', 'ng_morph_tags', 'ng_type', 'tt_tag', 'tt_lemma'])
+        dump_result(q_meta, q_lines_named_groups_eof, ng_header, csv_to_txm_path=csv_to_txm_path)
+
+        for p in processes:
+            p.join()
+
+    return worker
+
+def text_processor_ngrams(min_order, max_order, tokenize_path, get_ngrams_path, csv_to_txm_path):
+    def worker(q):
+        processes = []
+        q_meta, q_lines_in_eof = parse_input(q, processes=processes)
+
+        q_lines_tokenized_eof = run_shell_process('{tokenize} {0}'.format(EOF_MARK, tokenize=tokenize_path), q_lines_in_eof, processes)
 
         q_lines_ngrams_eof = run_shell_process(
-            './GetNGrams {0} {1} {2}'.format(min_order, max_order, EOF_MARK),
+            '{get_ngrams} {0} {1} {2}'.format(min_order, max_order, EOF_MARK, get_ngrams=get_ngrams_path),
             q_lines_tokenized_eof,
             processes
         )
 
-        dump_result(q_meta, q_lines_ngrams_eof, header='w\torder\tcount')
+        dump_result(q_meta, q_lines_ngrams_eof, header='w\torder\tcount', csv_to_txm_path=csv_to_txm_path)
 
         for p in processes:
             p.join()
@@ -248,7 +251,7 @@ def make_tasks(corpus_path, reset_xml_dir=False, fix_encoding=True, topics=None)
         csv_topic_path = os.path.join(corpus_path, 'csv', topic)
         create_dir_if_not_exists(xml_topic_path)
         create_dir_if_not_exists(csv_topic_path)
-        for fname in itertools.chain(glob(utf8_topic_path + '/*.html'), glob(utf8_topic_path + '/*.txt')):
+        for fname in itertools.chain(glob(os.path.join(utf8_topic_path, '*.html')), glob(os.path.join(utf8_topic_path, '*.txt'))):
             if fix_encoding:
                 fix_file_encoding(fname)
             text_id = str(len(metadata))
@@ -264,7 +267,7 @@ def make_tasks(corpus_path, reset_xml_dir=False, fix_encoding=True, topics=None)
 
 def create_corpus(metadata, corpus_path, corpus_tag):
     csv_lines = [[
-        'id', 
+        'id',
         'category',
         'fname'
     ]]
@@ -288,23 +291,23 @@ def process_tasks(tasks, processor, n_processes=4):
         worker = multiprocessing.Process(target=processor, args=(q,))
         worker.start()
         workers.append(worker)
-        
+
     for task in tasks:
         q.put(task)
-        
+
     for _ in range(len(workers)):
         q.put(None)
-        
+
     for worker in workers:
         worker.join()
-        
+
 def detect_topics(corpus_path):
     topics = []
     for item in glob(os.path.join(corpus_path, 'utf-8', '*')):
         if os.path.isdir(item):
             topics.append(os.path.basename(item))
     return topics
-        
+
 def process_texts(corpus_path, corpus_tag, processor, reset_xml_dir=False, topics=None):
     if topics is None:
         topics = detect_topics(corpus_path)
