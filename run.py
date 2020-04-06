@@ -27,9 +27,16 @@ def vgroups_mode_main(args):
     )
 
 
+def merge_mode_main(args):
+    print >>sys.stderr, 'Starting merge mode...'
+    merge_files(args.corpus_path)
+    print >>sys.stderr, 'Done.'
+
+
 def main():
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers()
+
     ngram_mode_parser = subparsers.add_parser('ngrams', formatter_class=argparse.ArgumentDefaultsHelpFormatter, help='create ngram based corpus')
     ngram_mode_parser.add_argument('-m', '--min-order', type=int, default=2, help='minimum n-gram order')
     ngram_mode_parser.add_argument('-M', '--max-order', type=int, default=4, help='maximum n-gram order')
@@ -38,6 +45,7 @@ def main():
     ngram_mode_parser.add_argument('--csv-to-txm', default=os.path.join('resources', 'CsvToTxm'), help='Path to CsvToTxm tool')
     ngram_mode_parser.add_argument('corpus_path', help='Path to corpus')
     ngram_mode_parser.set_defaults(func=ngram_mode_main)
+
     vgroups_mode_parser = subparsers.add_parser('verb-phrases', formatter_class=argparse.ArgumentDefaultsHelpFormatter, help='create verb phrase based corpus')
     vgroups_mode_parser.add_argument('--tokenize', default=os.path.join('resources', 'Tokenize'), help='Path to Tokenize tool')
     vgroups_mode_parser.add_argument('--tree-tagger', default='tree-tagger', help='Path to tree-tagger tool')
@@ -48,6 +56,11 @@ def main():
     vgroups_mode_parser.add_argument('--csv-to-txm', default=os.path.join('resources', 'CsvToTxm'), help='Path to CsvToTxm tool')
     vgroups_mode_parser.add_argument('corpus_path', help='Path to corpus')
     vgroups_mode_parser.set_defaults(func=vgroups_mode_main)
+
+    merge_mode_parser = subparsers.add_parser('merge', formatter_class=argparse.ArgumentDefaultsHelpFormatter, help='For each topic merge all the files into single corpus file per topic.')
+    merge_mode_parser.add_argument('corpus_path', help='Path to corpus')
+    merge_mode_parser.set_defaults(func=merge_mode_main)
+
     args = parser.parse_args()
     args.func(args)
     return 0

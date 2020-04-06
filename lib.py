@@ -280,6 +280,7 @@ def create_corpus(metadata, corpus_path, corpus_tag):
         shutil.copyfile(src_fname, dst_fname)
         topic, fname = metadata[text_id]
         csv_lines.append(map(lambda x: '"{0}"'.format(x), [text_id, topic, fname]))
+    shutil.move(os.path.join(corpus_path, 'csv'), os.path.join(corpus_path, '{0}.csv'.format(corpus_tag)))
     with open(os.path.join(dst_dir, 'metadata.csv'), 'w') as fout:
         fout.write('\n'.join(map(lambda x: ','.join(x), csv_lines)))
     return csv_lines
@@ -300,13 +301,6 @@ def process_tasks(tasks, processor, n_processes=4):
 
     for worker in workers:
         worker.join()
-
-def detect_topics(corpus_path):
-    topics = []
-    for item in glob(os.path.join(corpus_path, 'utf-8', '*')):
-        if os.path.isdir(item):
-            topics.append(os.path.basename(item))
-    return topics
 
 def process_texts(corpus_path, corpus_tag, processor, reset_xml_dir=False, topics=None):
     if topics is None:
